@@ -52,39 +52,83 @@ ids.forEach(id=>{el(id).value=data[id]||'';el(id).addEventListener('input',save)
 function render(){const root=el('items');root.replaceChildren();let number=0;for(const g of groups){let section=document.createElement('section');section.className='group';let h=document.createElement('h3');h.textContent=g.title;section.append(h);let desc=document.createElement('p');desc.className='description';desc.textContent=g.description;section.append(desc);for(const [id,name] of g.items){number++;let item=data.items[id],div=document.createElement('div');div.className='item';let heading=document.createElement('div');heading.className='item-name';heading.textContent=`${number}. ${name}`;div.append(heading);let statuses=document.createElement('div');statuses.className='statuses';(id==='lever-off'||id==='breaker-off'?['Pass','Fail','Not Tested']:['Complete','Missing','N/A']).forEach(status=>{let b=document.createElement('button');b.type='button';b.textContent=status;b.className=(item.status===status?'selected ':'')+(['Complete','Pass'].includes(status)?'complete':['Missing','Fail'].includes(status)?'missing':'na');b.setAttribute('aria-pressed',String(item.status===status));b.onclick=()=>{item.status=item.status===status?'':status;save();render()};statuses.append(b)});div.append(statuses);let notes=document.createElement('div');notes.className='note';let inp=document.createElement('input');inp.placeholder='Test result / notes / follow-up (optional)';inp.value=item.note||'';inp.setAttribute('aria-label','Notes for '+name);inp.addEventListener('input',()=>{item.note=inp.value;save()});notes.append(inp);div.append(notes);section.append(div)}root.append(section)}}
 render();update();function now(){return new Date().toLocaleString('en-US',{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'})}el('timestamp').value=now();
 el('reset').onclick=()=>{if(!confirm('Clear all fields and checklist statuses on this device?'))return;data={items:{}};for(const x of all)data.items[x.id]={status:'',note:''};ids.forEach(id=>el(id).value='');save();render();el('timestamp').value=now()};
-el('pdf').onclick=()=>{save();if(!el('tech').value.trim()){alert('Please enter the technician name before generating the report.');el('tech').focus();return}let stamp=now();el('timestamp').value=stamp;const filename=`101_Mobility_Miami_VPL_Checklist_${(data.customer||'job').replace(/[^a-z0-9-]/gi,'_').slice(0,35)}_${new Date().toISOString().slice(0,10)}.pdf`;
-const lines=[
- '101 MOBILITY MIAMI', 'VPL Installation & Inspection Checklist', '',
- 'TECHNICIAN / JOB INFORMATION',
- 'Technician: '+(data.tech||'-'), 'Customer / project: '+(data.customer||'-'),
- 'Manufacturer / model: '+(data.manufacturer||'-'), 'Serial number: '+(data.serial||'-'),
- 'Report generated: '+stamp, '', 'CHECKLIST SUMMARY',
- `${all.filter(x=>data.items[x.id].status).length}/${all.length} reviewed; ${all.filter(x=>['Missing','Fail'].includes(data.items[x.id].status)).length} missing / failed; ${all.filter(x=>!data.items[x.id].status).length} not reviewed`, ''
-];
-let n=0;
-for(const g of groups){lines.push(g.title.toUpperCase());for(const [id,name] of g.items){n++;const v=data.items[id];lines.push(`${n}. ${name}`,`    Status: ${v.status||'NOT REVIEWED'}`);if(id==='lever-off')lines.push('    Expected: No lift operation with disconnect lever OFF.');if(id==='breaker-off')lines.push('    Expected: Lift operates on battery backup with breaker OFF and lever ON.');if(v.note)lines.push('    Note: '+v.note);lines.push('')}lines.push('')}
-if(data.general)lines.push('ADDITIONAL NOTES',data.general);
-makeOfflinePDF(lines,filename);
+el('pdf').onclick=()=>{
+ save();if(!el('tech').value.trim()){alert('Please enter the technician name before generating the report.');el('tech').focus();return}
+ const stamp=now();el('timestamp').value=stamp;
+ const filename=`101_Mobility_Miami_VPL_Checklist_${(data.customer||'job').replace(/[^a-z0-9-]/gi,'_').slice(0,35)}_${new Date().toISOString().slice(0,10)}.pdf`;
+ createBrandedPDF(filename,stamp);
 };
-function makeOfflinePDF(lines,filename){
- // Self-contained PDF writer: no CDN, network access, or external dependencies.
- const clean=s=>String(s).replace(/[\u2018\u2019]/g,"'").replace(/[\u201c\u201d]/g,'"').replace(/[\u2013\u2014]/g,'-').replace(/[\u2022]/g,'*').replace(/[^\x20-\x7e]/g,'?');
+function createBrandedPDF(filename,stamp){
+ // Native vector PDF: fully offline, no dependency or CDN. Letter-sized portrait.
+ const W=612,H=792, navy=[0.075,0.23,0.37],green=[0.45,0.69,0.21],pale=[0.94,0.97,0.92],gray=[0.38,0.44,0.49],ink=[0.14,0.20,0.26],white=[1,1,1],line=[0.85,0.89,0.91],red=[0.68,0.20,0.18];
+ const clean=s=>String(s??'').replace(/[\u2018\u2019]/g,"'").replace(/[\u201c\u201d]/g,'"').replace(/[\u2013\u2014]/g,'-').replace(/[\u2022]/g,'-').replace(/[^\x20-\x7e]/g,'?');
  const esc=s=>clean(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
- const wrapped=[];
- for(const raw of lines){let words=clean(raw).split(/\s+/),line='';if(!raw){wrapped.push('');continue}for(const w of words){if((line+' '+w).trim().length>91&&line){wrapped.push(line);line=''}if(w.length>91){if(line){wrapped.push(line);line=''}for(let i=0;i<w.length;i+=91)wrapped.push(w.slice(i,i+91))}else line+=(line?' ':'')+w}if(line)wrapped.push(line)}
- const perPage=53,pages=[];for(let i=0;i<wrapped.length;i+=perPage)pages.push(wrapped.slice(i,i+perPage));
- const objects=[null],add=s=>{objects.push(s);return objects.length-1};
- const font=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
- const catalog=add(''),root=add(''),pageRefs=[];
- for(let p=0;p<pages.length;p++){
- let commands=['BT','/F1 9 Tf','12 TL','44 750 Td'];
- for(const line of pages[p]){commands.push('('+esc(line)+') Tj','T*')}
- commands.push('ET','BT','/F1 8 Tf','44 28 Td','('+esc(`101 Mobility Miami | Internal field checklist | Page ${p+1} of ${pages.length}`)+') Tj','ET');
- const stream=commands.join('\n');const content=add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
- const page=add(`<< /Type /Page /Parent ${root} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${content} 0 R >>`);pageRefs.push(page)
+ const col=a=>a.map(n=>n.toFixed(3)).join(' ');
+ let ops=[];
+ function rect(x,y,w,h,fill){ops.push(`${col(fill)} rg ${x.toFixed(2)} ${(H-y-h).toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f`)}
+ function txt(t,x,y,size=8,color=ink,bold=false){ops.push(`BT /${bold?'FB':'FR'} ${size.toFixed(2)} Tf ${col(color)} rg 1 0 0 1 ${x.toFixed(2)} ${(H-y).toFixed(2)} Tm (${esc(t)}) Tj ET`)}
+ function width(s,size,bold=false){let sum=0;for(const ch of clean(s))sum+=ch===' '?0.28:'il.,:;!|'.includes(ch)?0.24:'MW@#%'.includes(ch)?0.82:ch===ch.toUpperCase()?0.63:0.51;return sum*size*(bold?1.07:1)}
+ function fit(s,max,size=7.5,min=5.5){s=clean(s);while(size>min&&width(s,size)>max)size-=.2;if(width(s,size)>max){while(s.length&&width(s+'...',size)>max)s=s.slice(0,-1);s+='...'}return [s,size]}
+ function label(s,x,y,max,size=7.5,color=ink,bold=false){const [v,z]=fit(s,max,size);txt(v,x,y,z,color,bold)}
+ const left=30,right=582;
+ rect(0,0,612,79,navy);rect(0,79,612,5,green);
+ rect(30,19,41,40,green);txt('101',35,45,19,white,true);
+ txt('MOBILITY',82,38,19,white,true);txt('MIAMI',83,55,10,[.76,.91,.65],true);
+ txt('VPL INSTALLATION & INSPECTION',332,32,11,white,true);txt('TECHNICIAN COMPLETION REPORT',389,51,7.6,[.77,.86,.91]);
+ rect(left,97,552,72,[.955,.97,.98]);rect(left,97,4,72,green);
+ label('TECHNICIAN  '+(data.tech||'-'),42,115,260,8,ink,true);
+ label('CUSTOMER / PROJECT  '+(data.customer||'-'),315,115,255,8,ink,true);
+ label('LIFT  '+(data.manufacturer||'-'),42,136,260,7.6);
+ label('SERIAL  '+(data.serial||'-'),315,136,255,7.6);
+ label('GENERATED  '+stamp,42,157,515,7.6,gray);
+ const reviewed=all.filter(x=>data.items[x.id].status).length;
+ const problems=all.filter(x=>['Missing','Fail'].includes(data.items[x.id].status)).length;
+ const unreviewed=all.length-reviewed;
+ rect(left,179,552,32,pale);
+ txt(`${reviewed} / ${all.length} REVIEWED`,42,199,10,navy,true);
+ txt(`${problems} MISSING / FAILED`,245,199,8.7,problems?red:navy,true);
+ txt(`${unreviewed} NOT REVIEWED`,444,199,8.5,gray,true);
+ // Calculate row heights and scale all table content to a single page. Long notes are included.
+ const sections=groups.map(g=>({title:g.title,rows:g.items.map(([id,name])=>({id,name,status:data.items[id].status||'Not reviewed',note:data.items[id].note||''}))}));
+ const available=700-223;
+ const measure=(font)=>{
+  const rh=font+5,sh=font+10;let total=0;
+  for(const g of sections){total+=sh;for(const r of g.rows){let count=1;const note=clean(r.note);if(note)count+=Math.max(1,Math.ceil(width('Note: '+note,font*.85)/430));total+=rh+(count-1)*(font+1)}}
+  if(data.general)total+=font+12+Math.max(1,Math.ceil(width(data.general,font*.85)/510))*(font+2);
+  return total;
+ };
+ let font=8.1;while(font>5.25&&measure(font)>available)font-=.15;
+ // Wrapping without truncating notes; exceptionally long notes may require another page.
+ const wrap=(str,max,size)=>{const words=clean(str).split(/\s+/),out=[];let current='';for(let word of words){if(width(word,size)>max){if(current){out.push(current);current=''}while(word.length&&width(word,size)>max){let n=1;while(n<word.length&&width(word.slice(0,n+1),size)<=max)n++;out.push(word.slice(0,n));word=word.slice(n)}}if(width((current?current+' ':'')+word,size)>max&&current){out.push(current);current=word}else current+=(current?' ':'')+word}if(current)out.push(current);return out.length?out:['']};
+ const objects=[null],add=x=>(objects.push(x),objects.length-1);
+ const regular=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');const bold=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+ const catalog=add(''),pagesRoot=add('');const pageIds=[];
+ function flush(pageNo){txt('101 MOBILITY MIAMI  |  INTERNAL FIELD CHECKLIST  |  PAGE '+pageNo,30,773,7,gray);txt('Manufacturer instructions and required inspections remain applicable.',315,773,6.3,gray);const content=ops.join('\n')+'\n';const stream=add(`<< /Length ${content.length} >>\nstream\n${content}endstream`);const page=add(`<< /Type /Page /Parent ${pagesRoot} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /FR ${regular} 0 R /FB ${bold} 0 R >> >> /Contents ${stream} 0 R >>`);pageIds.push(page);ops=[]}
+ let y=223,page=1,n=0;
+ const rowH=font+5,secH=font+10;
+ for(const g of sections){if(y+secH+rowH>756){flush(page++);y=30}
+  rect(left,y,552,secH,navy);label(g.title.toUpperCase(),left+8,y+secH-5,530,font+1,white,true);y+=secH;
+  for(const r of g.rows){n++;
+   const noteLines=r.note?wrap('Note: '+r.note,442,font*.86):[];
+   const extra=r.id==='lever-off'?'Expected: No operation with disconnect OFF.':r.id==='breaker-off'?'Expected: Battery operation with breaker OFF / lever ON.':'';
+   const extraLines=extra?[extra]:[];
+   const height=rowH+(noteLines.length+extraLines.length)*(font+1);
+   if(y+height>756){flush(page++);y=30;rect(left,y,552,secH,navy);label(g.title.toUpperCase()+' (CONT.)',left+8,y+secH-5,530,font+1,white,true);y+=secH}
+   rect(left,y,552,height,n%2===0?[.96,.975,.98]:white);
+   rect(left,y+height-.45,552,.45,line);
+   label(String(n).padStart(2,'0'),left+7,y+rowH-4,20,font*.92,gray,true);
+   label(r.name,left+30,y+rowH-4,434,font,ink);
+   const statusColor=['Missing','Fail'].includes(r.status)?red:['Complete','Pass'].includes(r.status)?[.25,.48,.13]:gray;
+   label(r.status.toUpperCase(),left+469,y+rowH-4,76,font*.83,statusColor,true);
+   let yy=y+rowH;
+   for(const note of [...extraLines,...noteLines]){label(note,left+30,yy+font-1,434,font*.86,gray);yy+=font+1}
+   y+=height;
+  }
  }
- objects[root]=`<< /Type /Pages /Kids [${pageRefs.map(i=>i+' 0 R').join(' ')}] /Count ${pageRefs.length} >>`;
- objects[catalog]=`<< /Type /Catalog /Pages ${root} 0 R >>`;
+ if(data.general){const lines=wrap(data.general,510,font*.88);if(y+20+lines.length*(font+2)>756){flush(page++);y=30}rect(left,y,552,font+12,pale);txt('ADDITIONAL NOTES',left+8,y+font+5,font,navy,true);y+=font+14;for(const lineText of lines){txt(lineText,left+8,y+font,font*.88,ink);y+=font+2}}
+ flush(page);
+ objects[pagesRoot]=`<< /Type /Pages /Kids [${pageIds.map(i=>i+' 0 R').join(' ')}] /Count ${pageIds.length} >>`;
+ objects[catalog]=`<< /Type /Catalog /Pages ${pagesRoot} 0 R >>`;
  let pdf='%PDF-1.4\n',offsets=[0];for(let i=1;i<objects.length;i++){offsets[i]=pdf.length;pdf+=`${i} 0 obj\n${objects[i]}\nendobj\n`}
  const xref=pdf.length;pdf+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;
  for(let i=1;i<objects.length;i++)pdf+=String(offsets[i]).padStart(10,'0')+' 00000 n \n';
